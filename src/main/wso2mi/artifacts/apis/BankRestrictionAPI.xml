@@ -213,15 +213,6 @@
                       scope="axis2" 
                       type="STRING"/>
             
-            <!-- Set Content-Type for multipart/form-data request -->
-            <!-- The Content-Type header with boundary should be preserved from the incoming request -->
-            <property name="ContentType" expression="$trp:Content-Type" scope="axis2" type="STRING"/>
-            <property name="messageType" expression="$trp:Content-Type" scope="axis2" type="STRING"/>
-            
-            <!-- Ensure we're passing through the multipart data correctly -->
-            <property name="FORCE_HTTP_1.0" value="true" scope="axis2" type="STRING"/>
-            <property name="DISABLE_CHUNKING" value="true" scope="axis2" type="STRING"/>
-            
             <!-- Call the Bank API -->
             <sequence key="CallBankAPISequence"/>
             <log level="custom">

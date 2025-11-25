@@ -6,11 +6,14 @@
     <!-- Set Authorization header -->
     <header name="Authorization" expression="fn:concat('Bearer ', get-property('JWT_TOKEN'))" scope="transport"/>
     
-    <!-- Set Accept header -->
+    <!-- Set Accept header (application/json is fine - this is what we expect back) -->
     <header name="Accept" value="application/json" scope="transport"/>
     
-    <!-- Remove unwanted headers -->
+    <!-- Remove unwanted headers that might interfere -->
     <header name="Host" scope="transport" action="remove"/>
+    
+    <!-- CRITICAL: Do NOT set Content-Type here - let it pass through from the original request -->
+    <!-- The multipart boundary MUST be preserved from the incoming request -->
     
     <!-- Log the outgoing request -->
     <log level="custom">

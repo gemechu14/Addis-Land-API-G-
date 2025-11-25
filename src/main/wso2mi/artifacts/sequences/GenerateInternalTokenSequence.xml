@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <sequence name="GenerateInternalTokenSequence" xmlns="http://ws.apache.org/ns/synapse">
-    <!-- Store the original payload and properties -->
-    <property name="ORIGINAL_PAYLOAD" expression="$body" scope="default" type="STRING"/>
+    <!-- 
+        CRITICAL: DO NOT ACCESS $body HERE! 
+        Reading $body forces message building which consumes the multipart stream.
+        For multipart/form-data to work, we must never touch the body.
+        Only store transport properties that don't trigger body access.
+    -->
     <property name="ORIGINAL_HTTP_METHOD" expression="$axis2:HTTP_METHOD" scope="default" type="STRING"/>
     <property name="ORIGINAL_REST_URL_POSTFIX" expression="$axis2:REST_URL_POSTFIX" scope="default" type="STRING"/>
     <property name="ORIGINAL_QUERY_STRING" expression="$axis2:QUERY_STRING" scope="default" type="STRING"/>
-    <property name="ORIGINAL_CONTENT_TYPE" expression="$ctx:contentType" scope="default" type="STRING"/>
     
     <log level="custom">
         <property name="MESSAGE" value="Generating JWT token using Java mediator"/>
@@ -33,18 +36,6 @@
                 <property name="MESSAGE" value="JWT token generated successfully via Java mediator"/>
             </log>
         </else>
-    </filter>
-    
-    <!-- Restore the original payload if it was changed -->
-    <filter xpath="boolean(get-property('ORIGINAL_PAYLOAD'))">
-        <then>
-            <payloadFactory media-type="json">
-                <format>$1</format>
-                <args>
-                    <arg evaluator="xml" expression="get-property('ORIGINAL_PAYLOAD')"/>
-                </args>
-            </payloadFactory>
-        </then>
     </filter>
     
     <!-- Restore HTTP method and URL if they were changed -->
