@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sequence name="CallBankAPISequence" xmlns="http://ws.apache.org/ns/synapse">
+    <!-- Get the JWT token (should be set by GetAuthTokenSequence) -->
+    <property name="JWT_TOKEN" expression="get-property('JWT_TOKEN')" scope="default" type="STRING"/>
+    
+    <!-- Set Authorization header -->
+    <header name="Authorization" expression="fn:concat('Bearer ', get-property('JWT_TOKEN'))" scope="transport"/>
+    
+    <!-- Set Accept header -->
+    <header name="Accept" value="application/json" scope="transport"/>
+    
+    <!-- Remove unwanted headers -->
+    <header name="Host" scope="transport" action="remove"/>
+    
+    <!-- Log the outgoing request -->
+    <log level="custom">
+        <property name="MESSAGE" value="Calling Addisland Bank API"/>
+        <property name="HTTP_METHOD" expression="$axis2:HTTP_METHOD"/>
+        <property name="REST_URL_POSTFIX" expression="$axis2:REST_URL_POSTFIX"/>
+    </log>
+    
+    <!-- Call the Addisland Bank API -->
+    <call>
+        <endpoint key="AddislandBankAPIEndpoint"/>
+    </call>
+    
+    <!-- Log the response status -->
+    <log level="custom">
+        <property name="MESSAGE" value="Received response from Addisland Bank API"/>
+        <property name="HTTP_STATUS" expression="$axis2:HTTP_SC"/>
+    </log>
+</sequence>
+
+

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sequence name="ErrorHandlerSequence" xmlns="http://ws.apache.org/ns/synapse">
+    <!-- Log the error -->
+    <log level="custom">
+        <property name="ERROR_OCCURRED" value="true"/>
+        <property name="ERROR_MESSAGE" expression="get-property('ERROR_MESSAGE')"/>
+        <property name="ERROR_CODE" expression="get-property('ERROR_CODE')"/>
+    </log>
+    
+    <!-- Get error details -->
+    <property name="ERROR_EXCEPTION" expression="get-property('ERROR_EXCEPTION')"/>
+    <property name="ERROR_MESSAGE_TEXT" expression="get-property('ERROR_MESSAGE')"/>
+    <property name="ERROR_CODE_TEXT" expression="get-property('ERROR_CODE')"/>
+    
+    <!-- Check if we have a specific error message, otherwise use a generic one -->
+    <filter xpath="boolean(get-property('ERROR_MESSAGE_TEXT'))">
+        <then>
+            <property name="FINAL_ERROR_MESSAGE" expression="get-property('ERROR_MESSAGE_TEXT')"/>
+        </then>
+        <else>
+            <property name="FINAL_ERROR_MESSAGE" value="An internal error occurred while processing the request"/>
+        </else>
+    </filter>
+    
+    <!-- Check if we have a specific error code, otherwise use 500 -->
+    <filter xpath="boolean(get-property('ERROR_CODE_TEXT'))">
+        <then>
+            <property name="FINAL_ERROR_CODE" expression="get-property('ERROR_CODE_TEXT')"/>
+        </then>
+        <else>
+            <property name="FINAL_ERROR_CODE" value="INTERNAL_SERVER_ERROR"/>
+        </else>
+    </filter>
+    
+    <!-- Build error response -->
+    <payloadFactory media-type="json">
+        <format>{
+  "statusCode": 500,
+  "error": "$1",
+  "message": "$2"
+}</format>
+        <args>
+            <arg evaluator="xml" expression="get-property('FINAL_ERROR_CODE')"/>
+            <arg evaluator="xml" expression="get-property('FINAL_ERROR_MESSAGE')"/>
+        </args>
+    </payloadFactory>
+    
+    <!-- Set HTTP status code -->
+    <property name="HTTP_SC" value="500" scope="axis2" type="STRING"/>
+    <property name="messageType" value="application/json" scope="axis2" type="STRING"/>
+    
+    <!-- Respond with error -->
+    <respond/>
+</sequence>
+
+

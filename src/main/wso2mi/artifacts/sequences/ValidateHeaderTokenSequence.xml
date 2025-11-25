@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sequence name="ValidateHeaderTokenSequence" xmlns="http://ws.apache.org/ns/synapse">
+    <!-- Store the original payload and properties -->
+    <property name="ORIGINAL_PAYLOAD" expression="$body" scope="default" type="STRING"/>
+    <property name="ORIGINAL_HTTP_METHOD" expression="$axis2:HTTP_METHOD" scope="default" type="STRING"/>
+    <property name="ORIGINAL_REST_URL_POSTFIX" expression="$axis2:REST_URL_POSTFIX" scope="default" type="STRING"/>
+    <property name="ORIGINAL_QUERY_STRING" expression="$axis2:QUERY_STRING" scope="default" type="STRING"/>
+    <property name="ORIGINAL_CONTENT_TYPE" expression="$ctx:contentType" scope="default" type="STRING"/>
+    
+    <!-- Extract Authorization header -->
+    <property name="AUTH_HEADER" expression="$trp:Authorization" scope="default" type="STRING"/>
+    
+    <!-- Check if Authorization header exists -->
+    <filter xpath="get-property('AUTH_HEADER') = '' or not(boolean(get-property('AUTH_HEADER')))">
+        <then>
+            <log level="custom">
+                <property name="ERROR" value="Missing Authorization header"/>
+            </log>
+            <payloadFactory media-type="json">
+                <format>{"error": "unauthorized", "message": "Authorization header is required"}</format>
+                <args/>
+            </payloadFactory>
+            <property name="HTTP_SC" value="401" scope="axis2" type="STRING"/>
+            <respond/>
+        </then>
+    </filter>
+    
+    <!-- Extract token from Authorization header (remove "Bearer " prefix if present) -->
+    <property name="BEARER_TOKEN" expression="get-property('AUTH_HEADER')" scope="default" type="STRING"/>
+    
+    <!-- Create payload for validation request -->
+    <payloadFactory media-type="json">
+        <format>{"token": "$1"}</format>
+        <args>
+            <arg evaluator="xml" expression="get-property('BEARER_TOKEN')"/>
+        </args>
+    </payloadFactory>
+    
+    <!-- Set Content-Type for validation request -->
+    <property name="messageType" value="application/json" scope="axis2" type="STRING"/>
+    <property name="ContentType" value="application/json" scope="axis2" type="STRING"/>
+    
+    <!-- Call the token validation service -->
+    <call>
+        <endpoint key="TokenValidationEndpoint"/>
+    </call>
+    
+    <!-- Extract validation result -->
+    <property name="TOKEN_VALID" expression="json-eval($.valid)" scope="default" type="STRING"/>
+    <property name="VALIDATION_MESSAGE" expression="json-eval($.message)" scope="default" type="STRING"/>
+    
+    <!-- Check if token is valid -->
+    <filter xpath="get-property('TOKEN_VALID') = 'false' or not(boolean(get-property('TOKEN_VALID')))">
+        <then>
+            <log level="custom">
+                <property name="ERROR" value="Token validation failed"/>
+                <property name="REASON" expression="get-property('VALIDATION_MESSAGE')"/>
+            </log>
+            <payloadFactory media-type="json">
+                <format>{"error": "unauthorized", "message": "$1"}</format>
+                <args>
+                    <arg evaluator="xml" expression="get-property('VALIDATION_MESSAGE')"/>
+                </args>
+            </payloadFactory>
+            <property name="HTTP_SC" value="401" scope="axis2" type="STRING"/>
+            <respond/>
+        </then>
+        <else>
+            <log level="custom">
+                <property name="MESSAGE" value="Token validated successfully"/>
+            </log>
+        </else>
+    </filter>
+    
+    <!-- Store the validated token (without Bearer prefix for later use) -->
+    <script language="js">
+        <![CDATA[
+            var authHeader = mc.getProperty('BEARER_TOKEN');
+            var token = authHeader;
+            // Remove "Bearer " prefix if present
+            if (authHeader && authHeader.indexOf('Bearer ') === 0) {
+                token = authHeader.substring(7);
+            }
+            mc.setProperty('JWT_TOKEN', token);
+        ]]>
+    </script>
+    
+    <!-- Restore the original payload -->
+    <payloadFactory media-type="json">
+        <format>$1</format>
+        <args>
+            <arg evaluator="xml" expression="get-property('ORIGINAL_PAYLOAD')"/>
+        </args>
+    </payloadFactory>
+    
+    <!-- Restore HTTP method and URL if they were changed -->
+    <property name="HTTP_METHOD" expression="get-property('ORIGINAL_HTTP_METHOD')" scope="axis2" type="STRING"/>
+    <property name="REST_URL_POSTFIX" expression="get-property('ORIGINAL_REST_URL_POSTFIX')" scope="axis2" type="STRING"/>
+    <property name="QUERY_STRING" expression="get-property('ORIGINAL_QUERY_STRING')" scope="axis2" type="STRING"/>
+</sequence>
+
+

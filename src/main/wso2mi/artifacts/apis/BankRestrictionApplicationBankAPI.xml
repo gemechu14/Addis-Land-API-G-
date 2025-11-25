@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<api context="/bank-restriction-application-bank-api" name="BankRestrictionApplicationBankAPI" xmlns="http://ws.apache.org/ns/synapse">
+    
+    <!-- Resource 0: Get Token -->
+    <resource methods="GET" uri-template="/token">
+        <inSequence>
+            <log level="custom">
+                <property name="MESSAGE" value="Generating authentication token"/>
+            </log>
+            
+            <!-- Call the token service to get a fresh token -->
+            <call>
+                <endpoint key="TokenServiceEndpoint"/>
+            </call>
+            
+            <!-- Extract the JWT token from the response -->
+            <property name="JWT_TOKEN" expression="json-eval($.token)" scope="default" type="STRING"/>
+            
+            <!-- Check if token was received -->
+            <filter xpath="get-property('JWT_TOKEN') = '' or not(boolean(get-property('JWT_TOKEN')))">
+                <then>
+                    <log level="custom">
+                        <property name="ERROR" value="Failed to retrieve JWT token from token service"/>
+                    </log>
+                    <payloadFactory media-type="json">
+                        <format>{"error": "token_generation_failed", "message": "Unable to generate authentication token"}</format>
+                        <args/>
+                    </payloadFactory>
+                    <property name="HTTP_SC" value="500" scope="axis2" type="STRING"/>
+                </then>
+                <else>
+                    <log level="custom">
+                        <property name="MESSAGE" value="JWT token generated successfully"/>
+                    </log>
+                    
+                    <!-- Get current timestamp in milliseconds -->
+                    <script language="js">
+                        <![CDATA[
+                            var timestamp = new Date().getTime();
+                            mc.setProperty('CURRENT_TIMESTAMP', timestamp);
+                        ]]>
+                    </script>
+                    
+                    <!-- Create response with accesstoken and timestamp -->
+                    <payloadFactory media-type="json">
+                        <format>{"accesstoken": "$1", "timestamp": $2}</format>
+                        <args>
+                            <arg evaluator="xml" expression="get-property('JWT_TOKEN')"/>
+                            <arg evaluator="xml" expression="get-property('CURRENT_TIMESTAMP')"/>
+                        </args>
+                    </payloadFactory>
+                    <property name="HTTP_SC" value="200" scope="axis2" type="STRING"/>
+                </else>
+            </filter>
+            
+            <respond/>
+        </inSequence>
+        <faultSequence>
+            <sequence key="ErrorHandlerSequence"/>
+        </faultSequence>
+    </resource>
+    
+    <!-- Resource 1: Create Restriction Application -->
+    <resource methods="POST" uri-template="/restriction-application">
+        <inSequence>
+            <log level="custom">
+                <property name="MESSAGE" value="Creating new bank restriction application"/>
+            </log>
+            
+            <!-- Validate JWT token from header -->
+            <sequence key="ValidateHeaderTokenSequence"/>
+            
+            <!-- Set the correct path for the backend API -->
+            <property name="REST_URL_POSTFIX" value="/bank-restriction-application-bank-api" scope="axis2" type="STRING"/>
+            
+            <!-- Set Content-Type for JSON request -->
+            <property name="messageType" value="application/json" scope="axis2" type="STRING"/>
+            <property name="ContentType" value="application/json" scope="axis2" type="STRING"/>
+            
+            <!-- Call the Bank API -->
+            <sequence key="CallBankAPISequence"/>
+            <log level="custom">
+                <property name="MESSAGE" value="Successfully created bank restriction application"/>
+            </log>
+            <respond/>
+        </inSequence>
+        <faultSequence>
+            <sequence key="ErrorHandlerSequence"/>
+        </faultSequence>
+    </resource>
+    
+    <!-- Resource 2: List Applications (Paginated) -->
+    <resource methods="GET" uri-template="/restriction-application/paginated">
+        <inSequence>
+            <log level="custom">
+                <property name="MESSAGE" value="Fetching paginated bank restriction applications"/>
+            </log>
+            
+            <!-- Capture query string using multiple methods to ensure we get it -->
+            <!-- Method 1: Try axis2:QUERY_STRING -->
+            <property name="QUERY_PARAMS" expression="$axis2:QUERY_STRING" scope="default" type="STRING"/>
+            
+            <!-- Method 2: Use axis2 TransportInURL -->
+            <property name="TRANSPORT_IN_URL" expression="$axis2:TransportInURL" scope="default" type="STRING"/>
+            <filter xpath="(get-property('QUERY_PARAMS') = '' or not(boolean(get-property('QUERY_PARAMS')))) and boolean(get-property('TRANSPORT_IN_URL'))">
+                <then>
+                    <property name="QUERY_PARAMS" 
+                              expression="fn:substring-after(get-property('TRANSPORT_IN_URL'), '?')" 
+                              scope="default" 
+                              type="STRING"/>
+                </then>
+            </filter>
+            
+            <!-- Method 3: Try transport request URL header -->
+            <property name="REQUEST_URL_HEADER" expression="$trp:REQUEST_URL" scope="default" type="STRING"/>
+            <filter xpath="(get-property('QUERY_PARAMS') = '' or not(boolean(get-property('QUERY_PARAMS')))) and boolean(get-property('REQUEST_URL_HEADER'))">
+                <then>
+                    <property name="QUERY_PARAMS" 
+                              expression="fn:substring-after(get-property('REQUEST_URL_HEADER'), '?')" 
+                              scope="default" 
+                              type="STRING"/>
+                </then>
+            </filter>
+            
+            <!-- Method 4: Custom JavaScript fallback -->
+            <filter xpath="get-property('QUERY_PARAMS') = '' or not(boolean(get-property('QUERY_PARAMS')))">
+                <then>
+                    <script language="js">
+                        <![CDATA[
+                            var rawUri = mc.getProperty('REQUEST_URL_HEADER') || mc.getProperty('TRANSPORT_IN_URL');
+                            if (rawUri && rawUri.indexOf('?') > -1) {
+                                mc.setProperty('QUERY_PARAMS', rawUri.substring(rawUri.indexOf('?') + 1));
+                            }
+                        ]]>
+                    </script>
+                </then>
+            </filter>
+            
+            <!-- Store captured query params before validation (backup) -->
+            <property name="SAVED_QUERY_PARAMS" expression="get-property('QUERY_PARAMS')" scope="default" type="STRING"/>
+            
+            <!-- Log captured query parameters -->
+            <log level="custom">
+                <property name="BEFORE_VALIDATION" expression="get-property('SAVED_QUERY_PARAMS')"/>
+            </log>
+            
+            <!-- Validate JWT token from header -->
+            <sequence key="ValidateHeaderTokenSequence"/>
+            
+            <!-- Restore query string after validation (ValidateHeaderTokenSequence restores ORIGINAL_QUERY_STRING) -->
+            <property name="QUERY_PARAMS" expression="get-property('ORIGINAL_QUERY_STRING')" scope="default" type="STRING"/>
+            
+            <!-- If ORIGINAL_QUERY_STRING is also null, use our saved value -->
+            <filter xpath="get-property('QUERY_PARAMS') = '' or not(boolean(get-property('QUERY_PARAMS')))">
+                <then>
+                    <property name="QUERY_PARAMS" expression="get-property('SAVED_QUERY_PARAMS')" scope="default" type="STRING"/>
+                    <log level="custom">
+                        <property name="RESTORED_FROM_SAVED" expression="get-property('QUERY_PARAMS')"/>
+                    </log>
+                </then>
+            </filter>
+            
+            <!-- Set axis2:QUERY_STRING for downstream use -->
+            <property name="QUERY_STRING" expression="get-property('QUERY_PARAMS')" scope="axis2" type="STRING"/>
+            
+            <!-- Log query parameters for debugging -->
+            <log level="custom">
+                <property name="QUERY_STRING" expression="$axis2:QUERY_STRING"/>
+                <property name="QUERY_PARAMS" expression="get-property('QUERY_PARAMS')"/>
+            </log>
+            
+            <!-- Build the backend URL with query parameters -->
+            <filter xpath="boolean(get-property('QUERY_PARAMS')) and string-length(get-property('QUERY_PARAMS')) > 0">
+                <then>
+                    <property name="REST_URL_POSTFIX" 
+                              expression="fn:concat('/bank-restriction-application-bank-api/paginated?', get-property('QUERY_PARAMS'))" 
+                              scope="axis2" 
+                              type="STRING"/>
+                </then>
+                <else>
+                    <property name="REST_URL_POSTFIX" 
+                              value="/bank-restriction-application-bank-api/paginated" 
+                              scope="axis2" 
+                              type="STRING"/>
+                </else>
+            </filter>
+            
+            <log level="custom">
+                <property name="REST_URL_POSTFIX" expression="$axis2:REST_URL_POSTFIX"/>
+            </log>
+            
+            <!-- Call the Bank API -->
+            <sequence key="CallBankAPISequence"/>
+            <log level="custom">
+                <property name="MESSAGE" value="Successfully fetched paginated applications"/>
+            </log>
+            <respond/>
+        </inSequence>
+        <faultSequence>
+            <sequence key="ErrorHandlerSequence"/>
+        </faultSequence>
+    </resource>
+    
+    <!-- Resource 3: Get Application by ID -->
+    <resource methods="GET" uri-template="/restriction-application/{id}">
+        <inSequence>
+            <log level="custom">
+                <property name="MESSAGE" value="Fetching bank restriction application by ID"/>
+            </log>
+            
+            <!-- Extract the ID from the URI -->
+            <property name="uri.var.id" expression="get-property('uri.var.id')" scope="default" type="STRING"/>
+            
+            <log level="custom">
+                <property name="APPLICATION_ID" expression="get-property('uri.var.id')"/>
+            </log>
+            
+            <!-- Validate JWT token from header -->
+            <sequence key="ValidateHeaderTokenSequence"/>
+            
+            <!-- Build the backend URL with the ID -->
+            <property name="REST_URL_POSTFIX" 
+                      expression="fn:concat('/bank-restriction-application-bank-api/', get-property('uri.var.id'))" 
+                      scope="axis2" 
+                      type="STRING"/>
+            
+            <!-- Call the Bank API -->
+            <sequence key="CallBankAPISequence"/>
+            <log level="custom">
+                <property name="MESSAGE" value="Successfully fetched application details"/>
+            </log>
+            <respond/>
+        </inSequence>
+        <faultSequence>
+            <sequence key="ErrorHandlerSequence"/>
+        </faultSequence>
+    </resource>
+    
+    <!-- Resource 4: Approve Application -->
+    <resource methods="POST" uri-template="/restriction-application/{id}/approve">
+        <inSequence>
+            <log level="custom">
+                <property name="MESSAGE" value="Approving bank restriction application"/>
+            </log>
+            
+            <!-- Extract the ID from the URI -->
+            <property name="uri.var.id" expression="get-property('uri.var.id')" scope="default" type="STRING"/>
+            
+            <log level="custom">
+                <property name="APPLICATION_ID" expression="get-property('uri.var.id')"/>
+            </log>
+            
+            <!-- Validate JWT token from header -->
+            <sequence key="ValidateHeaderTokenSequence"/>
+            
+            <!-- Build the backend URL with the ID -->
+            <property name="REST_URL_POSTFIX" 
+                      expression="fn:concat('/bank-restriction-application-bank-api/', get-property('uri.var.id'), '/approve')" 
+                      scope="axis2" 
+                      type="STRING"/>
+            
+            <!-- Set Content-Type for multipart/form-data request -->
+            <!-- The Content-Type header with boundary should be preserved from the incoming request -->
+            <property name="ContentType" expression="$trp:Content-Type" scope="axis2" type="STRING"/>
+            <property name="messageType" expression="$trp:Content-Type" scope="axis2" type="STRING"/>
+            
+            <!-- Ensure we're passing through the multipart data correctly -->
+            <property name="FORCE_HTTP_1.0" value="true" scope="axis2" type="STRING"/>
+            <property name="DISABLE_CHUNKING" value="true" scope="axis2" type="STRING"/>
+            
+            <!-- Call the Bank API -->
+            <sequence key="CallBankAPISequence"/>
+            <log level="custom">
+                <property name="MESSAGE" value="Successfully approved application"/>
+            </log>
+            <respond/>
+        </inSequence>
+        <faultSequence>
+            <sequence key="ErrorHandlerSequence"/>
+        </faultSequence>
+    </resource>
+    
+</api>
+
+

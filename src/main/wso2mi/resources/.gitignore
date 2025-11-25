@@ -1,0 +1,8 @@
+# Ignore private key files for security
+*.pem
+*.key
+bank-private-key.*
+*.p12
+*.pfx
+
+
